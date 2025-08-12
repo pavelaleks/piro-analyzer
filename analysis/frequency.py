@@ -1,57 +1,62 @@
+# frequency.py
+import pandas as pd
 import matplotlib.pyplot as plt
 from collections import Counter
-import re
-import unicodedata
+from pathlib import Path  # <-- добавили
 
-# Маппинг этнонимов (оставьте свой полный словарь)
-NORMALIZATION_MAP = {
-    'samoyed': 'samoyeds', 'samoyedes': 'samoyeds',
-    'baribats': 'buryats', 'buriats': 'buryats', 'buriatz': 'buryats', 'buriates': 'buryats', 'buryats': 'buryats',
-    'kirghiz': 'kyrgyz', 'kirgiz': 'kyrgyz', 'kyrgiz': 'kyrgyz', 'kyrgyz': 'kyrgyz',
-    'kalmuk': 'kalmuks', 'kalmuks': 'kalmuks',
-    'tungus': 'tungus', 'tunguses': 'tungus',
-    'yakut': 'yakuts', 'yakuts': 'yakuts', 'jakut': 'yakuts', 'jakuts': 'yakuts',
-    'ostyak': 'khanty', 'ostyaks': 'khanty', 'khanty': 'khanty',
-    'vogul': 'mansi', 'voguls': 'mansi', 'mansi': 'mansi',
-    'tatars': 'tatars', 'bashkirs': 'bashkirs',
-}
+SPLIT_MULTI = False
+SEPARATORS = [",", ";", "/", "&", " и ", " and "]
 
-def clean_key(name: str) -> str:
-    nk = unicodedata.normalize('NFKD', name)
-    return re.sub(r'[^A-Za-z]', '', nk).lower()
+def _split_if_needed(s: str) -> list[str]:
+    if not SPLIT_MULTI:
+        return [s]
+    tokens = [s]
+    for sep in SEPARATORS:
+        new_tokens = []
+        for t in tokens:
+            new_tokens.extend([x.strip() for x in t.split(sep)])
+        tokens = [x for x in new_tokens if x]
+    return tokens
 
-def normalize_group(name: str) -> str:
-    key = clean_key(name)
-    if key in NORMALIZATION_MAP:
-        canon = NORMALIZATION_MAP[key]
-    elif key.startswith('yakut'):
-        canon = 'yakuts'
+def run(df, output_path="results/analysis_1_frequency_of_mentions.xlsx", top_k=10, show_plot=True):
+    # --- гарантируем, что каталог существует ---
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    col = "Ethnic Group Normalized"
+    if col not in df.columns:
+        raise KeyError(f"Колонка '{col}' не найдена в данных")
+
+    series = df[col].dropna().astype(str).str.strip()
+
+    if SPLIT_MULTI:
+        all_items = []
+        for val in series:
+            all_items.extend(_split_if_needed(val))
+        freq = pd.Series(Counter(all_items)).sort_values(ascending=False)
     else:
-        canon = key
-    return canon.title()
+        freq = series.value_counts(dropna=False)
 
-def run(df):
-    raw = df['Ethnic Group Normalized'].dropna().astype(str)
-    groups = raw.apply(normalize_group)
+    out_df = freq.reset_index()
+    out_df.columns = [col, "Count"]
+    out_df.to_excel(out_path, index=False)
+    print(f"Сохранено: {out_path}")
 
-    freq = Counter(groups)
-    total = sum(freq.values())
-    items = sorted(freq.items(), key=lambda x: x[1], reverse=True)
-
-    # Текстовый вывод
-    print(f"Total mentions: {total}, unique groups: {len(items)}")
-    print("Top 10 ethnic groups:")
-    for grp, cnt in items[:10]:
-        print(f" - {grp}: {cnt}")
+    total = int(out_df["Count"].sum())
+    print(f"Total mentions: {total}, unique groups: {len(out_df)}")
+    print("Top {}:".format(min(top_k, len(out_df))))
+    for _, row in out_df.head(top_k).iterrows():
+        print(f" - {row[col]}: {row['Count']}")
     print()
 
-    # График
-    labels, counts = zip(*items)
-    plt.figure(figsize=(12, 6))
-    bars = plt.bar(labels, counts)
-    plt.xticks(rotation=45, ha='right')
-    plt.title(f"Frequency of mentions (Total: {total})")
-    for bar, cnt in zip(bars, counts):
-        plt.text(bar.get_x()+bar.get_width()/2, cnt + total*0.005, str(cnt), ha='center', fontsize=8)
-    plt.tight_layout()
-    plt.show()
+    if show_plot and len(out_df) > 0:
+        labels = out_df[col].tolist()
+        counts = out_df["Count"].tolist()
+        plt.figure(figsize=(12, 6))
+        bars = plt.bar(labels, counts)
+        plt.xticks(rotation=45, ha="right")
+        plt.title(f"Frequency by '{col}' (Total: {total})")
+        for bar, cnt in zip(bars, counts):
+            plt.text(bar.get_x() + bar.get_width()/2, cnt, str(cnt), ha="center", va="bottom", fontsize=8)
+        plt.tight_layout()
+        plt.show()
