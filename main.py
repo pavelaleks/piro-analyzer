@@ -44,15 +44,16 @@ def main():
         help='Path to the enriched Excel data file')
     args = parser.parse_args()
 
-    df = load_data(args.input)
-    df = preprocess(df)
+    # Две версии датафрейма:
+    df_raw = load_data(args.input)  # исходные данные (для frequency)
+    df = preprocess(df_raw)  # подготовленные данные (для остальных анализов)
 
     while True:
         choice = select_analyses()
         if choice == '0':
             break
-        elif choice == '1':
-            freq_run(df)
+        elif choice == "1":
+            freq_run(df_raw)
         elif choice == '2':
             sent_run(df)
         elif choice == '3':
